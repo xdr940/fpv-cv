@@ -5,27 +5,27 @@ import errno
 import time
 import stat
 
-name = "/tmp/vsp-fifo"
-
+name = "./fifo_file"
+# 硬盘建立一个文件，对文件进行读写，实际数据没有流入硬盘
 class FIFOWriter:
     """FIFO writer class for named pipe output from the DJI headset"""
     def __init__(self):
-        self.FIFO = None
-        self.LastError = None
-        self.Handle = None
+        self.fifo_file = None# fifo file name
+        self.LastError = None#
+        self.Handle = None#
 
     def Open(self, HandleName = name):
-        self.FIFO = HandleName
+        self.fifo_file = HandleName
         try:
-            os.remove(self.FIFO)
+            os.remove(self.fifo_file)
         except FileNotFoundError:
             pass
 
         # TODO: Windows could use some love here eventually.
-        os.mkfifo(self.FIFO)
+        os.mkfifo(self.fifo_file)
 
         try:
-            self.Handle = os.open(self.FIFO, os.O_RDWR | os.O_NONBLOCK)
+            self.Handle = os.open(self.fifo_file, os.O_RDWR | os.O_NONBLOCK)
         except OSError as ex:
             if ex.errno == errno.ENXIO:
                 self.LastError = "Exception in Open(): {}".format(ex)
@@ -53,4 +53,4 @@ class FIFOWriter:
             os.close(self.Handle)
             self.Handle = None
 
-        self.Open(self.FIFO)
+        self.Open(self.fifo_file)

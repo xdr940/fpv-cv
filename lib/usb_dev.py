@@ -49,12 +49,12 @@ class USBDev:
         self.CheckThreadRunning = False
         self.ReadThreadRunning = False
         self.LastError = None
-        self.DeviceStatus = None
+        self.DeviceStatus = None#public
 
-    def PollDev(self):
+    def _pollDev(self):
         dev = usb.core.find(idVendor=VID, idProduct=PID)
         if dev is None:
-            self.DevicePresent = False
+            self.DevicePresent = False#public
             self.DeviceHandle = None
             self.DeviceCfg = None
             self.DeviceInterface = None
@@ -70,36 +70,36 @@ class USBDev:
             self.InPoint = self.DeviceInterface[1]
             self.OutPoint = self.DeviceInterface[0]
 
-    def ClaimDev(self):
+    def _claimDev(self):
         if self.DevicePresent:
             usb.util.claim_interface(self.DeviceHandle, self.DeviceInterface)
             self.ManuallyClaimed = True
 
-    def ReleaseDev(self):
+    def _releaseDev(self):
         if self.ManuallyClaimed and self.DevicePresent:
             usb.util.release_interface(self.DeviceHandle, self.DeviceInterface)
             self.ManuallyClaimed = False
 
-    def SendData(self, Data: bytearray):
+    def _sendData(self, Data: bytearray):
         if not self.DeviceHandle:
             return None
         try: 
             rv = self.DeviceHandle.write(self.OutPoint.bEndpointAddress, Data, timeout=500)
         except usb.core.USBError as er:
-            # print("DEBUG: Error in SendData(): {}".format(er.strerror))
+            # print("DEBUG: Error in _sendData(): {}".format(er.strerror))
             # self.CheckThreadRunning = False
             self.LastError = er
             return None
         print("DEBUG: Wrote " + str(rv) + " bytes to outpoint")
         return rv
     
-    def SendMagicPacket(self):
+    def _sendMagicPacket(self):
         magic = bytearray.fromhex(MagicPacket)
         self.DeviceStatus = "Sending Magic Packet"
         # Try a few times to send the magic packet
         # Headset initialization takes time, first attempt might time out
         for x in range(5):       
-            bs = self.SendData(magic)
+            bs = self._sendData(magic)
             if bs == None:
                 # Need to retry, so we give it a 500ms pause to limit USB queries:
                 time.sleep(.5)
@@ -110,41 +110,14 @@ class USBDev:
                 self.DeviceStatus = "Magic Packet Sent"
                 return bs
 
-    def RecvData(self):
-        if not self.DeviceHandle:
-            return None
-        if not self.MagicPacketSent:
-            sb = self.SendMagicPacket()
-            if not self.MagicPacketSent:
-                # It is still not sent, so don't bother trying to read
-                return None
-        try: 
-            rv = self.DeviceHandle.read(self.InPoint.bEndpointAddress, self.InPoint.wMaxPacketSize)
-        except usb.core.USBError as er:
-            # print("DEBUG: Error in RecvData(): {}".format(er.strerror))
-            self.LastError = er
-            # If the error is "No such device, revert back to device detection"
-            # TODO: Code based?  probably won't work on non en-US
-            if "No such device" in er.strerror and not self.CheckThreadRunning:
-                self.DevicePresent = False
-                # And we need to give the first iteration of the detect loop time to finish:
-                time.sleep(2)
-                self.StartDevCheckThread()
-            else:
-                # This is probably a timeout, just waiting for a stream to start:
-                self.DeviceStatus = "Waiting for Stream"
-            return None
-        # print("DEBUG: Read " + str(len(rv)) + " bytes from goggles")
-        # Successful read if we get here
-        self.DeviceStatus = "Streaming Data"
-        return rv
 
-    def DevPollLoop(self):
+
+    def _devPollLoop(self):
         self.CheckThreadRunning = True
         while True:
-            # print("DEBUG: Device poll loop is running...")
+            print("DEBUG: Device poll loop is running...")
             PriorState = self.DevicePresent
-            self.PollDev()
+            self._pollDev()
             if self.DevicePresent != PriorState:
                 print("DEBUG: Device State changed, new state is " + str(self.DevicePresent))
                 # Adjust the state to the magic packet not having been sent, so a re-init is done
@@ -157,8 +130,50 @@ class USBDev:
                 return
             time.sleep(.5)
 
-    def StartDevCheckThread(self):
+    #public
+    def startDevCheckThread(self):
         if self.CheckThreadRunning:
             return
-        self.DevCheckThreadHandle = threading.Thread(target=self.DevPollLoop)
-        self.DevCheckThreadHandle.start()
+        devCheckThreadHandle = threading.Thread(target=self._devPollLoop)
+        devCheckThreadHandle.start()
+        # public
+
+    def RecvData(self):
+        if not self.DeviceHandle:
+            return None
+        if not self.MagicPacketSent:
+            sb = self._sendMagicPacket()
+            if not self.MagicPacketSent:
+                # It is still not sent, so don't bother trying to read
+                return None
+        try:
+            rv = self.DeviceHandle.read(self.InPoint.bEndpointAddress, self.InPoint.wMaxPacketSize)
+        except usb.core.USBError as er:
+            # print("DEBUG: Error in RecvData(): {}".format(er.strerror))
+            self.LastError = er
+            # If the error is "No such device, revert back to device detection"
+            # TODO: Code based?  probably won't work on non en-US
+            if "No such device" in er.strerror:  # and not self.CheckThreadRunning:
+                self.DevicePresent = False
+                # And we need to give the first iteration of the detect loop time to finish:
+                time.sleep(2)
+                self.startDevCheckThread()
+                return None
+
+            else:
+                # self.startDevCheckThread()#试试这个能好吗
+
+
+                # This is probably a timeout, just waiting for a stream to start:
+                print(er)
+
+                if "No such device" in er.strerror:
+                    self.DeviceStatus = "No such device, Waiting for Stream"
+                if not self.CheckThreadRunning:
+                    self.DeviceStatus = "CheckThreadRunning false, Waiting for Stream"
+                return None
+
+        # print("DEBUG: Read " + str(len(rv)) + " bytes from goggles")
+        # Successful read if we get here
+        self.DeviceStatus = "Streaming Data"
+        return rv
